@@ -1,0 +1,7 @@
+data
+*.pyc
+outputs/
+logs/
+.ipynb_checkpoints
+__pycache__
+.vscode
