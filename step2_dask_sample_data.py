@@ -8,12 +8,15 @@ from pathlib import Path
 from prettyprinter import pprint
 import ee
 import geemap
+from retry import retry
+from requests.exceptions import HTTPError 
 
 # Initialize the Earth Engine library
 ee.Initialize()
 
 from ccdc import get_preprocessed_Sentinel2, add_ccdc_lambda
 
+@retry(HTTPError, tries=3, delay=2, max_delay=60)
 def sample_location(row):
     point = ee.Geometry.Point([row.longitude, row.latitude])
 
@@ -37,8 +40,17 @@ def sample_location(row):
     s2ImgCol_ccdc = s2ImgCol.map(add_s2_l005)
 
     time_series = ee.FeatureCollection(s2ImgCol_ccdc.map(sample_time_series).flatten())
-    df = geemap.ee_to_df(time_series)
-    return df
+
+    try:
+        df = geemap.ee_to_df(time_series)
+        return df
+        
+    except Exception as e:
+        print("----> ", e)
+        if str(e) == "User memory limit exceeded.": return 
+        else: return geemap.ee_to_df(time_series)
+
+
 
 
 if __name__ == "__main__":
@@ -68,6 +80,7 @@ if __name__ == "__main__":
     # ddf = dd.from_pandas(df, 2)
 
     ddf = dd.read_csv("data/WorldCover_Stratified_1k_per_cls.csv")
+    ddf = ddf[ddf['system:index'] != 2677]
     ddf = ddf.repartition(npartitions=100)
 
     def sample_partition(partition, partition_info):
@@ -78,8 +91,16 @@ if __name__ == "__main__":
         df.index.names = index_names
 
         partition_number = partition_info["number"]
-        df.to_csv(f"outputs/dask_outpus/partition_{partition_number}.csv")
+        save_url = f"outputs/dask_outputs/partition_{partition_number}.csv"
+        if not Path(save_url).exists():
+            df.to_csv(save_url)
 
     ddf.map_partitions(sample_partition, meta=(None, object)).compute()
+    
+    # # For Debugging:
+    # x = ddf.map_partitions(sample_partition, meta=(None, object))#.compute()
+    # x.get_partition(25).compute()
 
+    # 2626 -> 2726
+    # 2677, Exception: User memory limit exceeded.
 

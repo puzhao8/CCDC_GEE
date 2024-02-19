@@ -4,6 +4,8 @@ import geemap
 import pandas as pd
 from ccdc import get_preprocessed_Sentinel2, add_ccdc_lambda
 from pathlib import Path
+from retry import retry
+from requests.exceptions import HTTPError 
 
 ee.Initialize()
 
@@ -45,6 +47,7 @@ meta = {
 """ Sample time series over a given point """
 # point = ee.Geometry.Point([-72.19594365263514, 4.556298580150745])
 
+@retry(HTTPError, tries=10, delay=2, max_delay=60)
 def sample_location(row):
     print(row['system:index'], row.longitude, row.latitude)
     point = ee.Geometry.Point([row.longitude, row.latitude])
@@ -69,9 +72,15 @@ def sample_location(row):
     s2ImgCol_ccdc = s2ImgCol.map(add_s2_l005)
 
     time_series = ee.FeatureCollection(s2ImgCol_ccdc.map(sample_time_series).flatten())
-    df = geemap.ee_to_df(time_series)
+    
+    try:
+        df = geemap.ee_to_df(time_series)
+        return df
+    except Exception as e:
+        print("----> ", e)
+        if str(e) == "User memory limit exceeded.": return 
+        else: return geemap.ee_to_df(time_series)
 
-    return df
 
 # df = sample_location(row)
 
@@ -102,8 +111,8 @@ if __name__ == "__main__":
         ]
 
 
-    csv_restart = True
-    save_url = Path("outputs/sampled_ts_data_WorldCover_stratified_V1.csv")
+    csv_restart = False
+    save_url = Path("outputs/sampled_ts_data_WorldCover_stratified_V1_2626_2726.csv")
     if csv_restart or (not save_url.exists()):
         # create an empty csv
         df0 = pd.concat([pd.DataFrame([], columns=index_names + col_names)], axis=0)
@@ -117,7 +126,8 @@ if __name__ == "__main__":
 
 
     step = 10 # step > 1
-    for i in range(0, pntfc.shape[0], step):
+    # for i in range(0, pntfc.shape[0], step):
+    for i in range(1690, pntfc.shape[0], step):
         print()
         print(f"-------------------------------- [i = {i}] -------------------------------")
 

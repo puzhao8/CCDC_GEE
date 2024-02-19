@@ -25,6 +25,46 @@ def maskL8sr(image):
                 .updateMask(qaMask)\
                 .updateMask(saturationMask)
 
+# /** Calculate Phase Based on Flatten CCDC Coefficients **/
+def ccdc_phase(ccdc_seg):
+    def iterate_function(name, result):
+        name = ee.String(name)
+        flatten_coefs = flatten_segment(ccdc_seg.select(name))
+
+        # tan(\theta) = COS / SIN, where COS and SIN denote the coeficients of cos(2*\pi*x) and sin(2*\pi*x), respectively
+        phase = flatten_coefs.select(name.cat('_2')).atan2(flatten_coefs.select(name.cat('_3'))).regexpRename('_coefs_2', '_phase')
+        phase2 = flatten_coefs.select(name.cat('_4')).atan2(flatten_coefs.select(name.cat('_5'))).regexpRename('_coefs_4', '_phase2')
+        phase3 = flatten_coefs.select(name.cat('_6')).atan2(flatten_coefs.select(name.cat('_7'))).regexpRename('_coefs_6', '_phase3')
+        return ee.Image(result).addBands([phase, phase2, phase3])
+
+    result = ccdc_seg.select('.*coefs').bandNames().iterate(iterate_function, ee.Image().select())
+    return ee.Image(result)
+
+
+def ccdcStats(t, ccdc_seg):
+    # do a 1-year range
+    start = ee.Number(t).subtract(0.5)
+    end = ee.Number(t).add(0.5)
+    seq = ee.List.sequence(start, end, 0.05)
+    
+    synth_collection = seq.map(lambda n: syntheticImage(ee.Number(n), ccdc_seg))
+    synth_collection = ee.ImageCollection(synth_collection)
+
+    # mean = synth_collection.mean()
+    mean = synth_collection.reduce(ee.Reducer.mean())
+    minmax = synth_collection.reduce(ee.Reducer.minMax())
+    amp_names = mean.bandNames().map(lambda i: ee.String(i).replace('_mean', '_amp'))
+    amp = minmax.select(".*max").subtract(minmax.select(".*min")).select(minmax.select(".*max").bandNames(), amp_names)
+
+    rmse = ccdc_seg.select('.*_rmse').arrayGet(0)
+
+    # coefficients ["INTP", "SLP", "COS", "SIN", "COS2", "SIN2", "COS3", "SIN3", "RMSE"]
+    slope = ccdc_seg.select('.*coefs').arrayGet([0, 1]).regexpRename('_coefs', '_slope')
+    # The phase calculation mentioned in comments would need corresponding Python code if implemented.
+    
+    return rmse.addBands([mean, minmax, amp, slope])
+
+
 
 
 def getCcdcFit(time, ccdc):
@@ -52,10 +92,12 @@ def syntheticImage(t, ccdc):
     return image.set('system:time_start', date.millis())
 
 def flatten_segment(segment):
-    numbers = ee.List.sequence(0, 7).map(lambda n: ee.Number(n).format())
+    # This function is used to flatten CCDC segment coefs array into multiple bands in a single ee.Image
+    # e.g., B2_coefs [Array: 1x8] -> B2_coefs_[0-7], denoting the 8 coeficients for CCDC model
+    # INTP (intercept), Slope, COS, SIN, COS2, SIN2, COS3, SIN3
+    numbers = ee.List.sequence(0, 7).map(lambda n: ee.Number(n).int().format())
     result = segment.select('.*_coefs').bandNames().iterate(
-        lambda name, result: ee.Image(result).addBands(segment.select([name]).arrayFlatten([[name], numbers])),
-        ee.Image().select()
+        lambda name, result: ee.Image(result).addBands(segment.select([name]).arrayFlatten([[name], numbers])), ee.Image().select()
     )
     return ee.Image(result)
 
