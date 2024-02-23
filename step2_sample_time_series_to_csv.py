@@ -10,36 +10,37 @@ from requests.exceptions import HTTPError
 ee.Initialize()
 
 meta = {
- 'B11': 'float',
- 'B11_l005': 'float',
- 'B12': 'float',
- 'B12_l005': 'float',
- 'B2': 'float',
- 'B2_l005': 'float',
- 'B3': 'float',
- 'B3_l005': 'float',
- 'B4': 'float',
- 'B4_l005': 'float',
- 'B5': 'float',
- 'B5_l005': 'float',
- 'B6': 'float',
- 'B6_l005': 'float',
- 'B7': 'float',
- 'B7_l005': 'float',
- 'B8': 'float',
- 'B8A': 'float',
- 'B8A_l005': 'float',
- 'B8_l005': 'float',
- 'B9': 'float',
- 'FoY': 'float',
- 'lon': 'float',
- 'lat': 'float',
- 'ndvi': 'float',
- 'ndvi_l005': 'float',
- 'ndwi': 'float',
- 'ndwi_l005': 'float',
- 'water': 'float',
- 'water_l005': 'float'}
+    'B11': 'float',
+    'B11_l005': 'float',
+    'B12': 'float',
+    'B12_l005': 'float',
+    'B2': 'float',
+    'B2_l005': 'float',
+    'B3': 'float',
+    'B3_l005': 'float',
+    'B4': 'float',
+    'B4_l005': 'float',
+    'B5': 'float',
+    'B5_l005': 'float',
+    'B6': 'float',
+    'B6_l005': 'float',
+    'B7': 'float',
+    'B7_l005': 'float',
+    'B8': 'float',
+    'B8A': 'float',
+    'B8A_l005': 'float',
+    'B8_l005': 'float',
+    'B9': 'float',
+    'FoY': 'float',
+    'lon': 'float',
+    'lat': 'float',
+    'ndvi': 'float',
+    'ndvi_l005': 'float',
+    'ndwi': 'float',
+    'ndwi_l005': 'float',
+    'water': 'float',
+    'water_l005': 'float'
+ }
 
 # FAO = ee.FeatureCollection("FAO/GAUL_SIMPLIFIED_500m/2015/level0")
 # country = FAO.filter(ee.Filter.eq("ADM0_NAME", "Colombia"))
@@ -134,7 +135,7 @@ if __name__ == "__main__":
         rows = pntfc.loc[i:i+step-1]
         print(rows)
 
-        df = rows.apply(sample_location, axis=1) 
+        df = rows.apply(sample_location, axis=1) # apply -> itertuples ?
         df = pd.concat(df.to_list(), axis=0, keys=df.index.values)
         df.index.names = index_names
         

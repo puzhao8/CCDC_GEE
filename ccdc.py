@@ -1,5 +1,7 @@
 
 import pandas as pd
+import numpy as np
+from prettyprinter import pprint
 import math
 import ee
 ee.Initialize()
@@ -246,3 +248,84 @@ def chart_boxplot_time_series_cmp(imgCol, region, band1, band2):
 
     # Now df can be used with seaborn or matplotlib for plotting
     return df
+
+
+
+def get_stacked_ccdc_features(check_date):
+    t = millis_to_fractionOfYear(ee.Date(check_date).millis()) # Fraction of Year (FoY)
+
+    """ Sentinel-2 """
+    ccdc_s2 = ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')\
+            .filter(ee.Filter.eq('sensor', 's2-sr'))\
+            .filter(ee.Filter.eq('lambda', 0.005))\
+            .mosaic()
+            
+    ccdc_s2_t = getCcdcFit(t, ccdc_s2)
+
+    stats_s2 = ccdcStats(t, ccdc_s2_t)
+    phase_s2 = ccdc_phase(ccdc_s2_t)
+
+    print("---------------> Sentinel-2 <-----------------")
+    pprint(stats_s2.bandNames().getInfo())
+
+
+    """ Sentinel-1 """
+    ccdc_s1 = ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')\
+            .filter(ee.Filter.eq('sensor', 's1'))\
+            .filter(ee.Filter.eq('lambda', 1))\
+            # .filterBounds(point)
+            
+    ccdc_s1_t = getCcdcFit(t, ccdc_s1)
+
+    stats_s1 = ccdcStats(t, ccdc_s1_t)
+    phase_s1 = ccdc_phase(ccdc_s1_t)
+
+    print("---------------> Sentinel-1 <-----------------")
+    pprint(stats_s1.bandNames().getInfo())
+
+    """ Synthetic Image Predicted by CCDC """
+    # syn_s2_t = syntheticImage(t, ccdc_s2)
+    # syn_s1_t = syntheticImage(t, ccdc_s1)
+
+
+
+    """ # %% REM, DEM, Slope, TWI etc. """
+    # Relative Elevation Model
+    rem = ee.ImageCollection("projects/global-wetland-watch/assets/features/REM")\
+            .mosaic().rename('rem')
+
+    # Digital Elevation Model
+    dem = ee.ImageCollection("COPERNICUS/DEM/GLO30")\
+            .select('DEM').mosaic().rename('elevation')\
+            .setDefaultProjection(crs="EPSG:4326", scale=30)
+
+    # Calculate Terrain Based on DEM: slope, aspect, hillshade
+    # Terrain: https://code.earthengine.google.com/2e0a145c5bb298add69e97ed24854db3
+    terrain = ee.Algorithms.Terrain(dem)
+            
+    # Topographic Wetness Index (TWI)
+    flowAccumulation = ee.Image('WWF/HydroSHEDS/15ACC').select('b1')
+    slope = ee.Terrain.slope(dem).multiply(math.pi / 180)
+
+    # TWI in GEE: https://code.earthengine.google.com/17a95828c7e9e6a4e06115eb737ee235
+    twi = flowAccumulation.divide(slope.tan()).log().unmask(500000).rename('twi').setDefaultProjection(crs="EPSG:4326", scale=10).toInt16()
+    # Map.addLayer(twi, {'min':0, 'max':20, 'palette':['blue', 'white', 'green']}, 'twi')
+
+    """ labels """
+    world_cover = ee.ImageCollection('ESA/WorldCover/v100').first().select('Map').rename('world_cover')
+    wetland_label = ee.Image("projects/global-wetland-watch/assets/labels/COL/top10_label").add(1).rename('wetland_label').unmask()
+    wetland_mask = wetland_label.gt(0).rename('wetland_mask')
+
+    """ stack all feature into a single image """
+    # rename water and water_coefs band names for Sentinel-1
+    # stack_s2 = stats_s2.addBands(syn_s2_t)
+    # stack_s1 = stats_s1.addBands(syn_s1_t)
+    s1_scaled_100 = stats_s1.select("V.*_mean|V.*_max|V.*_min").multiply(100)
+    stack = (stats_s2.addBands([stats_s1, phase_s2.unitScale(-3.15, 3.15), phase_s1.unitScale(-3.15, 3.15)]).multiply(1e4)
+                    .addBands(s1_scaled_100, s1_scaled_100.bandNames(), True)
+                    .addBands([twi, rem, world_cover, wetland_label, wetland_mask, terrain])
+                    .regexpRename("_1", "_s1")
+                    .set('system:time_start', ee.Date(check_date).millis())
+    )
+
+    return stack

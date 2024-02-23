@@ -15,7 +15,7 @@ country = FAO.filter(ee.Filter.eq("ADM0_NAME", "Colombia"))
 
 #%% CCDC features
 
-check_date = "2020-07-01"
+check_date = "2018-07-01"
 t = millis_to_fractionOfYear(ee.Date(check_date).millis()) # Fraction of Year (FoY)
 
 """ Sentinel-2 """
@@ -34,7 +34,7 @@ phase_s2 = ccdc_phase(ccdc_s2_t)
 ccdc_s1 = ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')\
         .filter(ee.Filter.eq('sensor', 's1'))\
         .filter(ee.Filter.eq('lambda', 1))\
-        # .filterBounds(point)
+        .mosaic()
         
 ccdc_s1_t = getCcdcFit(t, ccdc_s1)
 
@@ -79,7 +79,7 @@ wetland_type_names = {
   10: "Swamps"
 }
 
-if True:
+if False:
         selected_bands = [band for band in bandList if '_mean' in band]
         for band in selected_bands:
                 df = get_and_plot_stats_group_by(
@@ -96,7 +96,7 @@ if True:
 
 #%% RSE grouped by World Cover
 
-if False:
+if True:
         from utils.ccdc_stats import get_and_plot_stats_group_by
         worldcover_type_names = {
                 10: "tree cover",
@@ -112,8 +112,8 @@ if False:
                 100: "Moss and lichen"
         }
 
-        selected_bands = [band for band in bandList if band.endswith('_mean')]
-        # selected_bands = ['VV_rmse', 'VH_rmse', 'water_rmse_s1']
+        selected_bands = [band for band in bandList if band.endswith('_rmse')]
+        selected_bands = ['ndvi_rmse', 'ndvi_rmse', 'water_rmse']
         for band in selected_bands:
                 df = get_and_plot_stats_group_by(
                         stack_raw=stack_raw, 
@@ -122,5 +122,5 @@ if False:
                         region=country, 
                         groupby_name_dict=worldcover_type_names,
                         scale=100,
-                        title_note=check_date
+                        check_date=check_date
                 )

@@ -8,7 +8,7 @@ ee.Initialize()
 
 
 
-def get_and_plot_stats_group_by(stack_raw, band='B2_rmse', group_by_name='world_cover', region=None, groupby_name_dict={}, scale=100, title_note=None):
+def get_and_plot_stats_group_by(stack_raw, band='B2_rmse', group_by_name='world_cover', region=None, groupby_name_dict={}, scale=100, check_date=None):
     # stack_raw: ee.Image, including all bands needed
     # band: the band used to conduct the statical analysis
     # group_by_name: the band used to group statistic by
@@ -18,6 +18,8 @@ def get_and_plot_stats_group_by(stack_raw, band='B2_rmse', group_by_name='world_
     save_dir = Path(f"outputs/goup_by_{group_by_name}")
     save_dir.mkdir(exist_ok=True, parents=True)
 
+    save_name = f'{band}_{check_date[:4]}.png' if check_date is not None else f'{band}.png'
+
     group_by_name_list = list(groupby_name_dict.values())
 
     is_sar_band = (band.startswith('V')) or (band.endswith('_s1'))
@@ -26,7 +28,7 @@ def get_and_plot_stats_group_by(stack_raw, band='B2_rmse', group_by_name='world_
     image = stack_raw.select(band)
     if is_sar_band: image = image.clamp(-10, 10)
 
-    combined = stack_raw.select(band).addBands(stack_raw.select(group_by_name))
+    combined = image.addBands(stack_raw.select(group_by_name))
     
     meanReducer = ee.Reducer.mean()
     stdDevReducer = ee.Reducer.stdDev()
@@ -53,13 +55,13 @@ def get_and_plot_stats_group_by(stack_raw, band='B2_rmse', group_by_name='world_
 
 
     if is_sar_band:
-            ax = df.plot(kind='bar', x=group_by_name, y=['mean', 'stdDev'], title=f"{band}: {title_note}", figsize=(12, 5))
+            ax = df.plot(kind='bar', x=group_by_name, y=['mean', 'stdDev'], title=f"{band}: {check_date}", figsize=(12, 5))
     else:
-            ax = df.plot(kind='bar', x=group_by_name, y=['mean', 'stdDev'], ylim=(0, 0.1), title=f"{band}: {title_note}", figsize=(12, 5))
+            ax = df.plot(kind='bar', x=group_by_name, y=['mean', 'stdDev'], ylim=(0, 0.1), title=f"{band}: {check_date}", figsize=(12, 5))
     
     ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')  # Adjust here
     plt.tight_layout()
-    plt.savefig(save_dir / f'{band}.png', dpi=100)
+    plt.savefig(save_dir / save_name, dpi=100)
     plt.close()
 
     return df

@@ -11,7 +11,7 @@ top10_label = ee.Image("projects/global-wetland-watch/assets/labels/COL/top10_la
 wetland_mask = top10_label.gt(0).rename('wetland_mask')
 
 # Add the top 10 labels and pixel longitude-latitude bands to the WorldCover image
-image = top10_label.addBands(wetland_mask).addBands(WorldCover).addBands(ee.Image.pixelLonLat())
+image = top10_label.int8().addBands(wetland_mask).addBands(WorldCover).addBands(ee.Image.pixelLonLat())
 
 
 # Define the region of interest. Replace `country` with your actual region.
@@ -21,16 +21,21 @@ country = FAO.filter(ee.Filter.eq("ADM0_NAME", "Colombia"))
 
 # Perform stratified sampling on the image
 pntCol = image.stratifiedSample(
-    numPoints=10000,
-    classBand='wetland_mask',
+    numPoints=1000,
+    classBand='wetland_label',
     region=country,
     scale=10,
     projection='EPSG:4326',
     seed=42,
+    # classValues=[0],
+    # classPoints=[10000],
     dropNulls=True,
     tileScale=4,
-    geometries=True
+    geometries=False
 )
 
-df = geemap.ee_to_df(pntCol) # TODO: very slow
-df.to_csv('data/gdf_wetMask_Stratified_1k_per_cls.csv')
+# df = geemap.ee_to_gdf(pntCol) # TODO: very slow
+
+from step3_sample_training_points_to_csv import fc_to_gdf
+df = geemap.ee_to_gdf(pntCol)
+df.to_csv('data/wetland_label_Stratified_1k_per_cls.csv')
