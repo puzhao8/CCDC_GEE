@@ -32,10 +32,12 @@ def ccdc_phase(ccdc_seg):
         flatten_coefs = flatten_segment(ccdc_seg.select(name))
 
         # tan(\theta) = COS / SIN, where COS and SIN denote the coeficients of cos(2*\pi*x) and sin(2*\pi*x), respectively
-        phase = flatten_coefs.select(name.cat('_2')).atan2(flatten_coefs.select(name.cat('_3'))).regexpRename('_coefs_2', '_phase')
-        phase2 = flatten_coefs.select(name.cat('_4')).atan2(flatten_coefs.select(name.cat('_5'))).regexpRename('_coefs_4', '_phase2')
-        phase3 = flatten_coefs.select(name.cat('_6')).atan2(flatten_coefs.select(name.cat('_7'))).regexpRename('_coefs_6', '_phase3')
-        return ee.Image(result).addBands([phase, phase2, phase3])
+        # tan(x) = a2/a3 => x = arctan(a2/a3) => x= a3.atan2(a2)
+        phase = flatten_coefs.select(".*_SIN.*").atan2(flatten_coefs.select(".*_COS.*")).regexpRename('_coefs_SIN', '_phase')
+        # phase = flatten_coefs.select(name.cat('_3')).atan2(flatten_coefs.select(name.cat('_2'))).regexpRename('_coefs_2', '_phase')
+        # phase2 = flatten_coefs.select(name.cat('_5')).atan2(flatten_coefs.select(name.cat('_4'))).regexpRename('_coefs_4', '_phase2')
+        # phase3 = flatten_coefs.select(name.cat('_7')).atan2(flatten_coefs.select(name.cat('_6'))).regexpRename('_coefs_6', '_phase3')
+        return ee.Image(result).addBands(phase)
 
     result = ccdc_seg.select('.*coefs').bandNames().iterate(iterate_function, ee.Image().select())
     return ee.Image(result)
@@ -94,8 +96,10 @@ def syntheticImage(t, ccdc):
 def flatten_segment(segment):
     # This function is used to flatten CCDC segment coefs array into multiple bands in a single ee.Image
     # e.g., B2_coefs [Array: 1x8] -> B2_coefs_[0-7], denoting the 8 coeficients for CCDC model
-    # INTP (intercept), Slope, COS, SIN, COS2, SIN2, COS3, SIN3
-    numbers = ee.List.sequence(0, 7).map(lambda n: ee.Number(n).int().format())
+    # INTP (intercept), Slope, COS, SIN, COS2, SIN2, COS3, SIN3'
+    coefs_names = ee.List(["INTP", "SLP", "COS", "SIN", "COS2", "SIN2", "COS3", "SIN3"])
+
+    numbers = ee.List.sequence(0, 7).map(lambda n: coefs_names.get(n)) #ee.Number(n).int().format()
     result = segment.select('.*_coefs').bandNames().iterate(
         lambda name, result: ee.Image(result).addBands(segment.select([name]).arrayFlatten([[name], numbers])), ee.Image().select()
     )

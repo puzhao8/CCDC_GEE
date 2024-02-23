@@ -18,7 +18,7 @@ from sklearn.linear_model import LassoCV
 import numpy as np
 
 target_band = 'B12'
-X = df_.loc[904][['FoY', target_band]]
+X = df_.loc[856][['FoY', target_band]]
 # X = df_.loc[pnt_idx_list].reset_index()[['FoY', target_band]]
 
 X['const'] = 1
@@ -49,4 +49,25 @@ lasso_cv.fit(X_train, y_train)
 # Optimal lambda value
 optimal_lambda = lasso_cv.alpha_
 print("Optimal lambda (alpha) value:", optimal_lambda)
+
+
+
+#%%
+import numpy as np
+import matplotlib.pyplot as plt
+
+# t = np.linspace(2017, 2024, 219)
+t = X['t'].values
+
+def do_pred(t):
+    A = lasso_cv.coef_
+    X = np.array([1, t, np.cos(2*np.pi*t), np.sin(2*np.pi*t), np.cos(4*np.pi*t), np.sin(4*np.pi*t), np.cos(6*np.pi*t), np.cos(6*np.pi*t)])
+
+    return ((X[:, np.newaxis].transpose()) @ (A[:, np.newaxis]))[0]
+
+y = list(map(do_pred, list(t)))
+
+plt.plot(t, X[target_band])
+plt.plot(list(t), y)
+plt.show()
 

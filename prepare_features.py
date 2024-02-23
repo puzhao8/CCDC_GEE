@@ -1,12 +1,26 @@
 
 #%% Start Configuration
-import ee
+import json
 import xarray as xr
 import math
-ee.Initialize()
+
 from ccdc import getCcdcFit, ccdcStats, syntheticImage, ccdc_phase, millis_to_fractionOfYear
 from prettyprinter import pprint
 import matplotlib.pyplot as plt
+import ee
+ee.Initialize()
+
+
+# keyfile='C:\Users\puzh\.config\earthengine'
+# key=json.load(open(keyfile))
+# service_account=key['client_email']
+# credentials = ee.ServiceAccountCredentials(service_account, keyfile)
+# ee.Initialize(credentials,
+# #     project='nrt-wildfiremonitoring',
+#     url='https://earthengine-highvolume.googleapis.com'
+# )
+
+
 
 
 FAO = ee.FeatureCollection("FAO/GAUL_SIMPLIFIED_500m/2015/level0")
@@ -63,7 +77,7 @@ syn_s1_t = syntheticImage(t, ccdc_s1)
 #%% REM, DEM, Slope, TWI etc.
 
 # Relative Elevation Model
-rem = ee.ImageCollection("projects/global-wetland-watch/assets/features/REM_MERIT_SWORD")\
+rem = ee.ImageCollection("projects/global-wetland-watch/assets/features/REM")\
         .filterBounds(country).mosaic().rename('rem')
 
 # Digital Elevation Model
@@ -195,7 +209,7 @@ from matplotlib.colors import LinearSegmentedColormap as linSegCol
 colors = ['#c21515','#ffffff','#19a11d']
 my_colormap = linSegCol.from_list("my_colormap", colors)
 
-bands_selected = [band for band in bandList if band.endswith('_rmse') or band.endswith('_mean')]
+bands_selected = [band for band in bandList if band.endswith('_phase3')]
 for band in bands_selected:
     vmin, vmax = ds[band].quantile([0.02, 0.98]).values
     print(f"band: {band}, range: ({vmin}, {vmax})")
@@ -213,7 +227,123 @@ for band in bands_selected:
         ds[band].T.plot(vmin=vmin, vmax=vmax)
 
     plt.tight_layout()
-    plt.savefig(f'figures/{band}.png', dpi=100)
+    plt.savefig(f'outputs/features/{band}.png', dpi=100)
     plt.close()
 
     time.sleep(3)
+
+
+#%%
+import pandas as pd
+
+wetland_type_names = {
+  0: "non wetlands",
+  1: "Transformed wetlands",
+  2: "Varzeas and/or Igapós",
+  3: "Wetlands in small depressions", # supplied by rain and/or floodable or waterlogged savannas and/or Zurales and/or estuaries
+  4: "Flooded forests",
+  5: "Overflow Forests",
+  6: "Interfluvial flooded forests",
+  7: "Floodable grasslands",
+  8: "Rivers",
+  9: "Wetlands in the process of transformation",
+  10: "Swamps"
+}
+wetland_names_list = list(wetland_type_names.values())
+
+result = {}
+for band in ['water_rmse']:
+        # if band.endswith('_rmse'):
+        print(band)
+        # band = 'ndwi_rmse'
+
+        combined = stats_s1.select(band).clamp(-10, 10).addBands(wetland_label)
+        meanReducer = ee.Reducer.mean()
+        stdDevReducer = ee.Reducer.stdDev()
+
+        reducer = meanReducer.combine(
+                        reducer2=stdDevReducer,
+                        sharedInputs=True).group(
+                                        groupField = 1,  
+                                        groupName = 'TIPO',
+                                )
+
+        band_result = combined.reduceRegion(
+                reducer=reducer,
+                geometry=country,
+                scale=100, #// Set an appropriate scale, depending on your rasters' resolution
+                maxPixels=1e20
+        )
+
+        result[band] = band_result.getInfo()['groups']
+
+        df = pd.DataFrame(result[band])
+        df['band'] = band
+        df['name'] = wetland_names_list
+
+        if band in ['VV_rmse', 'VH_rmse', 'water_rmse_s1', 'water_rmse']:
+                ax = df.plot(kind='bar', x='name', y=['mean', 'stdDev'], title=f"{band}: {check_date}", figsize=(12, 5))
+        else:
+                ax = df.plot(kind='bar', x='name', y=['mean', 'stdDev'], ylim=(0, 0.1), title=f"{band}: {check_date}", figsize=(12, 5))
+        
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')  # Adjust here
+        plt.tight_layout()
+        plt.savefig(f'outputs/RMSE/{band}_s1.png', dpi=100)
+        plt.close()
+
+
+#%% World Cover
+import pandas as pd
+
+worldcover_type_names = {
+  10: "tree cover",
+  20: "Shrubland",
+  30: "Grassland",
+  40: "Cropland", # supplied by rain and/or floodable or waterlogged savannas and/or Zurales and/or estuaries
+  50: "Built-up",
+  60: "Bare/sparse vegetation",
+  70: "Snow and ice",
+  80: "Permanent water",
+  90: "Herbaceour wetland",
+  95: "Mangroves",
+  100: "oss and lichen"
+}
+worldcover_names = list(worldcover_type_names.values())
+WorldCover = ee.ImageCollection('ESA/WorldCover/v100').first()
+
+
+result = {}
+for band in bandList:
+        if band.endswith('_rmse'):
+                print(band)
+                # band = 'ndwi_rmse'
+                combined = stats_s2.select(band).addBands(WorldCover)
+                meanReducer = ee.Reducer.mean()
+                stdDevReducer = ee.Reducer.stdDev()
+
+                reducer = meanReducer.combine(
+                                reducer2=stdDevReducer,
+                                sharedInputs=True).group(
+                                                groupField = 1,  
+                                                groupName = 'WorldCover',
+                                        )
+
+                band_result = combined.reduceRegion(
+                        reducer=reducer,
+                        geometry=country,
+                        scale=100, #// Set an appropriate scale, depending on your rasters' resolution
+                        maxPixels=1e20
+                )
+
+                result[band] = band_result.getInfo()['groups']
+
+                df = pd.DataFrame(result[band])
+                df['band'] = band
+                df['name'] = worldcover_names
+
+
+                ax = df.plot(kind='bar', x='name', y=['mean', 'stdDev'], ylim=(0, 0.1), title=f"{band}: {check_date}", figsize=(12, 5))
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')  # Adjust here
+                plt.tight_layout()
+                plt.savefig(f'outputs/RMSE/{band}.png', dpi=100)
+                plt.close()

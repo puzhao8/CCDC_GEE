@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     step = 10 # step > 1
     # for i in range(0, pntfc.shape[0], step):
-    for i in range(1690, pntfc.shape[0], step):
+    for i in range(4310, pntfc.shape[0], step):
         print()
         print(f"-------------------------------- [i = {i}] -------------------------------")
 

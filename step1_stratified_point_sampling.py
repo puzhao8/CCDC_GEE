@@ -21,7 +21,7 @@ country = FAO.filter(ee.Filter.eq("ADM0_NAME", "Colombia"))
 
 # Perform stratified sampling on the image
 pntCol = image.stratifiedSample(
-    numPoints=1000,
+    numPoints=10000,
     classBand='wetland_mask',
     region=country,
     scale=10,
