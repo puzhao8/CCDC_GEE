@@ -22,10 +22,10 @@ def maskL8sr(image):
     thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0)
 
     # Replace the original bands with the scaled ones and apply the masks
-    return image.addBands(opticalBands, None, True)\
-                .addBands(thermalBands, None, True)\
-                .updateMask(qaMask)\
-                .updateMask(saturationMask)
+    return (image.addBands(opticalBands, None, True)
+                .addBands(thermalBands, None, True)
+                .updateMask(qaMask)
+                .updateMask(saturationMask))
 
 # /** Calculate Phase Based on Flatten CCDC Coefficients **/
 def ccdc_phase(ccdc_seg):
@@ -63,10 +63,9 @@ def ccdcStats(t, ccdc_seg):
     rmse = ccdc_seg.select('.*_rmse').arrayGet(0)
 
     # coefficients ["INTP", "SLP", "COS", "SIN", "COS2", "SIN2", "COS3", "SIN3", "RMSE"]
-    slope = ccdc_seg.select('.*coefs').arrayGet([0, 1]).regexpRename('_coefs', '_slope')
-    # The phase calculation mentioned in comments would need corresponding Python code if implemented.
+    # slope = ccdc_seg.select('.*coefs').arrayGet([0, 1]).regexpRename('_coefs', '_slope')
     
-    return rmse.addBands([mean, minmax, amp, slope])
+    return rmse.addBands([mean, minmax, amp])
 
 
 
@@ -107,7 +106,8 @@ def flatten_segment(segment):
     )
     return ee.Image(result)
 
-def millis_to_fractionOfYear(t):
+# Convert Millis into the fraction of year: 2020-07-01 -> 2020.5
+def ms_to_foY(t):
     date = ee.Date(t)
     dayOfYear = date.getRelative('day', 'year')
     year = date.get('year')
@@ -170,7 +170,7 @@ def add_ccdc_lambda(sensor, lambda_key, region=None):
     lambda_value = lambda_dict[lambda_key]
     
     def process_img(img):
-        n = millis_to_fractionOfYear(img.date().millis())
+        n = ms_to_foY(img.date().millis())
         ccdc_lambda = ccdc_local.filter(ee.Filter.eq('lambda', lambda_value))
         syn_img = syntheticImage(n, ccdc_lambda)
         syn_img = add_band_postfix(syn_img, lambda_key)
@@ -193,10 +193,11 @@ def add_landsat_ccdc(postfix, region=None):
     if region is not None: ccdc_landsat = ccdc_landsat.filterBounds(region)
 
     def process_img(img):
-        n = millis_to_fractionOfYear(img.date())  # Assuming millis_to_fractionOfYear is defined
+        n = ms_to_foY(img.date())  # Assuming ms_to_foY is defined
         
-        img = img.toFloat().select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'ST_B10'])\
+        img = (img.toFloat().select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'ST_B10'])
                            .rename(['BLUE', 'GREEN', 'RED', 'NIR', 'SWIR1', 'SWIR2', 'TEMP'])
+            )
         
         # Assuming syntheticImage and ccdc_landsat are defined
         syn_img = syntheticImage(ee.Number(n), ccdc_landsat)  # ccdc_landsat should be defined elsewhere
@@ -214,6 +215,223 @@ def add_landsat_ccdc(postfix, region=None):
     return process_img
 
 
+# /*
+#   This function is used to obtain raw CCDC coeficients and stats (rmse, min, max, mean).
+#   @params.ccdc: input ccdc parameters, use this by default if available
+#   @params.sensor: specify sensor parameter
+#   @params.lambda: specify lambda parameter
+#   @params.t: specify the time t to obtain the corresponding coefs and stats 
+#   Return: Stacked features
+#   example: 
+#     get_coefs_and_stats({ccdc: ccdc (ee.ImageCollection), t: t (ms)}) or 
+#     get_coefs_and_stats({sensor: 's1', lambda: 0.3, t: t (ms)})
+# */
+def get_coefs_stats_phase(params):
+    if 'ccdc' in params:
+        ccdc = params['ccdc']
+        print("input ccdc (get_coefs_and_stats)!")
+    else:
+        sensor = params['sensor']
+        lambda_val = params['lambda']
+        print(f"sensor: {sensor}, lambda = {lambda_val}")
+        
+        ccdc = (ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
+            .filter(ee.Filter.eq('sensor', sensor))
+            .filter(ee.Filter.eq('lambda', lambda_val))
+            .mosaic())
+          
+  
+    t = params['t']        
+    ccdc_t = getCcdcFit(t, ccdc)
+  
+    stats = ccdcStats(t, ccdc_t)
+    coefs = flatten_segment(ccdc_t).regexpRename("_coefs_", "_")
+    phase = ccdc_phase(ccdc_t) # phase info can be derived from coefs, we don't have to export them.
+
+    return ee.Image(coefs).addBands([stats, phase])
+
+# /*
+#   This function is used to fetch seasonal synthetic images in April, July, and Oct.
+#   @params.ccdc: input ccdc parameters, use this by default if available
+#   @params.sensor: specify sensor parameter
+#   @params.lambda: specify lambda parameter
+#   @params.year: specify year for fetching seasonal synthetic images
+#   Return: Stacked seasonal synthetic images
+# */
+def get_seasonal_synImgs(params):
+    if 'ccdc' in params:
+        ccdc = params['ccdc']
+        print("input ccdc (get_seasonal_synImgs)!")
+    else:
+        sensor = params['sensor']
+        lambda_val = params['lambda']
+        print(f"sensor: {sensor}, lambda = {lambda_val}")
+        
+        ccdc = (
+            ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
+            .filter(ee.Filter.eq('sensor', sensor))
+            .filter(ee.Filter.eq('lambda', lambda_val))
+            .mosaic()
+        )
+    
+    year = params['year']
+  
+    synIm_0401 = syntheticImage(ms_to_foY(f"{year}-04-01"), ccdc)  # syntheticImage function should be defined
+    synIm_0701 = syntheticImage(ms_to_foY(f"{year}-07-01"), ccdc)
+    synIm_1001 = syntheticImage(ms_to_foY(f"{year}-10-01"), ccdc)
+  
+    synIm_0401 = add_band_postfix(synIm_0401, 'apr')
+    synIm_0701 = add_band_postfix(synIm_0701, 'jul')
+    synIm_1001 = add_band_postfix(synIm_1001, 'oct')
+  
+    return ee.Image(synIm_0401).addBands([synIm_0701, synIm_1001])
+
+""" Stack features from various sources """
+def stack_features(check_date="2020-07-01"):
+
+    year = check_date[:4]
+    t = ms_to_foY(ee.Date(check_date).millis()) # Fraction of Year (FoY)
+
+    """ Sentinel-2 """
+    print("---------------> Sentinel-2 <-----------------")
+    ccdc_s2 = (
+        ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
+            .filter(ee.Filter.eq('sensor', 's2-sr'))
+            .filter(ee.Filter.eq('lambda', 0.005))
+            
+        ).mosaic()
+            
+    stack_s2 = get_coefs_stats_phase({'ccdc': ccdc_s2, 't': t})
+    synImg_s2_seasonal = get_seasonal_synImgs({'ccdc': ccdc_s2, 'year': year})
+
+    # pprint(stack_s2.bandNames().getInfo())
+
+
+    """ Sentinel-1 """
+    print("---------------> Sentinel-1 <-----------------")
+    ccdc_s1 = (
+        ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
+            .filter(ee.Filter.eq('sensor', 's1'))
+            .filter(ee.Filter.eq('lambda', 1))
+            # .filter(ee.Filter.eq('lambda', 0.3))
+        ).mosaic()
+            
+    stack_s1 = get_coefs_stats_phase({'ccdc': ccdc_s1, 't': t})
+    synImg_s1_seasonal = get_seasonal_synImgs({'ccdc': ccdc_s1, 'year': year})
+
+    # pprint(stack_s1.bandNames().getInfo())
+
+    """ PALSAR-2 Scansar """      
+    ccdc_ss = (
+        ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
+        .filter(ee.Filter([
+                    ee.Filter.eq('sensor', 'scansar'), 
+                    ee.Filter.eq('lambda', 0.5), 
+                    # ee.Filter.eq('lambda', 0.3), 
+                    # ee.Filter.stringContains('system:index', 'v3')
+                ]))
+        ).mosaic()
+    stack_ss = get_coefs_stats_phase({'ccdc': ccdc_ss, 't': t})
+    synImg_ss_seasonal = get_seasonal_synImgs({'ccdc': ccdc_ss, 'year': year})
+
+
+    # // ===========================> Topography-based Features <===========================
+    """ # %% REM, DEM, Slope, TWI etc. """
+    # Relative Elevation Model
+    rem = ee.ImageCollection("projects/global-wetland-watch/assets/features/REM")\
+            .mosaic().rename('rem')
+
+    # Digital Elevation Model
+    dem = ee.ImageCollection("COPERNICUS/DEM/GLO30")\
+            .select('DEM').mosaic().rename('elevation')\
+            .setDefaultProjection(crs="EPSG:4326", scale=30)
+
+    # Calculate Terrain Based on DEM: slope, aspect, hillshade
+    # Terrain: https://code.earthengine.google.com/2e0a145c5bb298add69e97ed24854db3
+    terrain = ee.Algorithms.Terrain(dem)
+            
+    # Topographic Wetness Index (TWI)
+    flowAccumulation = ee.Image('WWF/HydroSHEDS/15ACC').select('b1')
+    slope = ee.Terrain.slope(dem).multiply(math.pi / 180)
+
+    # TWI in GEE: https://code.earthengine.google.com/17a95828c7e9e6a4e06115eb737ee235
+    twi = flowAccumulation.divide(slope.tan()).log().unmask(500000).rename('twi').setDefaultProjection(crs="EPSG:4326", scale=10).toInt16()
+    # Map.addLayer(twi, {'min':0, 'max':20, 'palette':['blue', 'white', 'green']}, 'twi')
+
+    # // HAND Product 30m
+    hand30_1000 = ee.Image("users/gena/GlobalHAND/30m/hand-1000").rename('hand30_100')
+    hand30_100 = ee.ImageCollection("users/gena/global-hand/hand-100").mosaic().rename('hand30_1000')
+
+    # // ===========================> Climate related Features <===========================
+    canopy_height = ee.Image('users/nlang/ETH_GlobalCanopyHeight_2020_10m_v1').unmask().rename('canopy_height')
+    canopy_height_std = ee.Image('users/nlang/ETH_GlobalCanopyHeightSD_2020_10m_v1').rename('canopy_height_std')
+
+    # Ecoregion
+    ecoregion = ee.FeatureCollection("RESOLVE/ECOREGIONS/2017").reduceToImage(
+        properties=['ECO_ID'], reducer=ee.Reducer.first()).rename('ECO_ID')
+
+    biome = ee.FeatureCollection("RESOLVE/ECOREGIONS/2017").reduceToImage(
+        properties=['BIOME_NUM'], reducer=ee.Reducer.first()).rename('BIOME_NUM')
+
+    # OpenLandMap: Soil Water Content
+    soil_water = ee.Image('OpenLandMap/SOL/SOL_WATERCONTENT-33KPA_USDA-4B1C_M/v01').regexpRename('b', 'soil_water_')
+
+    # Yearly Average Precipitation (ERA5 or CHIRPS?)
+    year_filter = ee.Filter.date(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-01-01').advance(1, 'year'))
+
+    chirps_yearly_precip = (
+        ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
+            .select('precipitation')
+            .filter(year_filter)
+            .sum()
+            .rename('chirps_precip')
+        )
+
+    era5_yearly_precip = (
+        ee.ImageCollection("ECMWF/ERA5/MONTHLY")
+            .filter(year_filter)
+            .select('total_precipitation')
+            .sum()
+            .multiply(1e3)
+            .rename('era5_precip')
+    )
+    
+
+    """ labels """
+    world_cover = ee.ImageCollection('ESA/WorldCover/v100').first().select('Map').rename('world_cover')
+    wetland_label = ee.Image("projects/global-wetland-watch/assets/labels/COL/top10_label").add(1).rename('wetland_label').unmask()
+    wetland_mask = wetland_label.gt(0).rename('wetland_mask')
+
+    GWL_FCS30 = ee.ImageCollection("projects/global-wetland-watch/assets/training-data/global/GWL_FCS30_2020").mosaic().rename('GWL_FCS30')
+
+    # RFW: Reguarly Flooded Wetlands (500m) vs. CIFOR 2016 Global wetlands Map (231m)
+    rfw = ee.Image("projects/global-wetland-watch/assets/labels/global/Regularly_Flooded_Wetlands").rename('rfw')
+    cifor = ee.Image("projects/global-wetland-watch/assets/labels/global/CIFOR_2016_TROP_SUBTROP_Wetland_V3b").unmask().divide(10).int8().rename('cifor')
+
+
+    """ rescale bands """
+    synImg_s2_seasonal = synImg_s2_seasonal.multiply(1e4)
+    synImg_s1_seasonal = synImg_s1_seasonal.unitScale(-30, 5).multiply(1e4)
+    synImg_ss_seasonal = synImg_ss_seasonal.unitScale(-30, 5).multiply(1e4)
+
+    """ stack all feature into a single image """
+    # rename water and water_coefs band names for Sentinel-1
+    stack = (stack_s2.addBands([stack_s1, stack_ss])
+                    .addBands([synImg_s2_seasonal, synImg_s1_seasonal, synImg_ss_seasonal]) #// synthetic images in April, July, and October
+                    .regexpRename("_1_1", "_ss") #// rename some Scansar bands
+                    .regexpRename("_1", "_s1") #// rename some Sentinel-1 bands
+                    .addBands([
+                        rem, twi, terrain, hand30_1000, hand30_100, #// topography-based features
+                        canopy_height, canopy_height_std,  #// canopy height features
+                        ecoregion, biome, chirps_yearly_precip, era5_yearly_precip, soil_water, #// ecoregion, biome, chirps, era5
+                        world_cover, GWL_FCS30, wetland_label, wetland_mask, rfw, cifor #// labels
+                    ]).set('system:time_start', ee.Date(check_date).millis())
+    )
+
+    return stack
+
+
+
 
 # TODO: ipygee not working, need to fix here
 # /** boxplot time series **/
@@ -226,7 +444,7 @@ def chart_boxplot_time_series_cmp(imgCol, region, band1, band2):
     # Function to apply to each image
     def reduce_region(img):
         stats = img.reduceRegion(reducer=ee.Reducer.percentile([25, 50, 75]), geometry=region, scale=10, maxPixels=1e20)
-        fraction_of_year = millis_to_fractionOfYear(img.date())
+        fraction_of_year = ms_to_foY(img.date())
         return {
             'Date': fraction_of_year,
             # 'Date': img.date().format(),
@@ -250,82 +468,8 @@ def chart_boxplot_time_series_cmp(imgCol, region, band1, band2):
     return df
 
 
+if __name__ == "__main__":
 
-def get_stacked_ccdc_features(check_date):
-    t = millis_to_fractionOfYear(ee.Date(check_date).millis()) # Fraction of Year (FoY)
-
-    """ Sentinel-2 """
-    ccdc_s2 = ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')\
-            .filter(ee.Filter.eq('sensor', 's2-sr'))\
-            .filter(ee.Filter.eq('lambda', 0.005))\
-            .mosaic()
-            
-    ccdc_s2_t = getCcdcFit(t, ccdc_s2)
-
-    stats_s2 = ccdcStats(t, ccdc_s2_t)
-    phase_s2 = ccdc_phase(ccdc_s2_t)
-
-    print("---------------> Sentinel-2 <-----------------")
-    pprint(stats_s2.bandNames().getInfo())
-
-
-    """ Sentinel-1 """
-    ccdc_s1 = ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')\
-            .filter(ee.Filter.eq('sensor', 's1'))\
-            .filter(ee.Filter.eq('lambda', 1))\
-            # .filterBounds(point)
-            
-    ccdc_s1_t = getCcdcFit(t, ccdc_s1)
-
-    stats_s1 = ccdcStats(t, ccdc_s1_t)
-    phase_s1 = ccdc_phase(ccdc_s1_t)
-
-    print("---------------> Sentinel-1 <-----------------")
-    pprint(stats_s1.bandNames().getInfo())
-
-    """ Synthetic Image Predicted by CCDC """
-    # syn_s2_t = syntheticImage(t, ccdc_s2)
-    # syn_s1_t = syntheticImage(t, ccdc_s1)
-
-
-
-    """ # %% REM, DEM, Slope, TWI etc. """
-    # Relative Elevation Model
-    rem = ee.ImageCollection("projects/global-wetland-watch/assets/features/REM")\
-            .mosaic().rename('rem')
-
-    # Digital Elevation Model
-    dem = ee.ImageCollection("COPERNICUS/DEM/GLO30")\
-            .select('DEM').mosaic().rename('elevation')\
-            .setDefaultProjection(crs="EPSG:4326", scale=30)
-
-    # Calculate Terrain Based on DEM: slope, aspect, hillshade
-    # Terrain: https://code.earthengine.google.com/2e0a145c5bb298add69e97ed24854db3
-    terrain = ee.Algorithms.Terrain(dem)
-            
-    # Topographic Wetness Index (TWI)
-    flowAccumulation = ee.Image('WWF/HydroSHEDS/15ACC').select('b1')
-    slope = ee.Terrain.slope(dem).multiply(math.pi / 180)
-
-    # TWI in GEE: https://code.earthengine.google.com/17a95828c7e9e6a4e06115eb737ee235
-    twi = flowAccumulation.divide(slope.tan()).log().unmask(500000).rename('twi').setDefaultProjection(crs="EPSG:4326", scale=10).toInt16()
-    # Map.addLayer(twi, {'min':0, 'max':20, 'palette':['blue', 'white', 'green']}, 'twi')
-
-    """ labels """
-    world_cover = ee.ImageCollection('ESA/WorldCover/v100').first().select('Map').rename('world_cover')
-    wetland_label = ee.Image("projects/global-wetland-watch/assets/labels/COL/top10_label").add(1).rename('wetland_label').unmask()
-    wetland_mask = wetland_label.gt(0).rename('wetland_mask')
-
-    """ stack all feature into a single image """
-    # rename water and water_coefs band names for Sentinel-1
-    # stack_s2 = stats_s2.addBands(syn_s2_t)
-    # stack_s1 = stats_s1.addBands(syn_s1_t)
-    s1_scaled_100 = stats_s1.select("V.*_mean|V.*_max|V.*_min").multiply(100)
-    stack = (stats_s2.addBands([stats_s1, phase_s2.unitScale(-3.15, 3.15), phase_s1.unitScale(-3.15, 3.15)]).multiply(1e4)
-                    .addBands(s1_scaled_100, s1_scaled_100.bandNames(), True)
-                    .addBands([twi, rem, world_cover, wetland_label, wetland_mask, terrain])
-                    .regexpRename("_1", "_s1")
-                    .set('system:time_start', ee.Date(check_date).millis())
-    )
-
-    return stack
+    check_date = '2020-07-01'
+    stack = stack_features(check_date)
+    print("stack: ", stack.bandNames().getInfo())
