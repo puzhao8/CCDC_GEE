@@ -312,8 +312,8 @@ def stack_features(check_date="2020-07-01"):
     ccdc_s1 = (
         ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
             .filter(ee.Filter.eq('sensor', 's1'))
-            .filter(ee.Filter.eq('lambda', 1))
-            # .filter(ee.Filter.eq('lambda', 0.3))
+            # .filter(ee.Filter.eq('lambda', 1))
+            .filter(ee.Filter.eq('lambda', 0.3))
         ).mosaic()
             
     stack_s1 = get_coefs_stats_phase({'ccdc': ccdc_s1, 't': t})
@@ -326,9 +326,9 @@ def stack_features(check_date="2020-07-01"):
         ee.ImageCollection('projects/unep-sdg661/GWW/ccdc')
         .filter(ee.Filter([
                     ee.Filter.eq('sensor', 'scansar'), 
-                    ee.Filter.eq('lambda', 0.5), 
-                    # ee.Filter.eq('lambda', 0.3), 
-                    # ee.Filter.stringContains('system:index', 'v3')
+                    # ee.Filter.eq('lambda', 0.5), 
+                    ee.Filter.eq('lambda', 0.3), 
+                    ee.Filter.stringContains('system:index', 'v3')
                 ]))
         ).mosaic()
     stack_ss = get_coefs_stats_phase({'ccdc': ccdc_ss, 't': t})
@@ -342,9 +342,10 @@ def stack_features(check_date="2020-07-01"):
             .mosaic().rename('rem')
 
     # Digital Elevation Model
-    dem = ee.ImageCollection("COPERNICUS/DEM/GLO30")\
-            .select('DEM').mosaic().rename('elevation')\
+    dem = (ee.ImageCollection("COPERNICUS/DEM/GLO30")
+            .select('DEM').mosaic().rename('elevation')
             .setDefaultProjection(crs="EPSG:4326", scale=30)
+    )
 
     # Calculate Terrain Based on DEM: slope, aspect, hillshade
     # Terrain: https://code.earthengine.google.com/2e0a145c5bb298add69e97ed24854db3
@@ -395,12 +396,16 @@ def stack_features(check_date="2020-07-01"):
             .multiply(1e3)
             .rename('era5_precip')
     )
-    
 
-    """ labels """
-    world_cover = ee.ImageCollection('ESA/WorldCover/v100').first().select('Map').rename('world_cover')
-    wetland_label = ee.Image("projects/global-wetland-watch/assets/labels/COL/top10_label").add(1).rename('wetland_label').unmask()
-    wetland_mask = wetland_label.gt(0).rename('wetland_mask')
+
+    """ Fused labels of World Cover and Wetland Labels"""
+    landMask = ee.Image('COPERNICUS/Landcover/100m/Proba-V-C3/Global/2019').select('discrete_classification').neq(200)
+    world_cover = ee.ImageCollection('ESA/WorldCover/v100').first().select('Map').mask(landMask).int().rename('world_cover')
+    wetland_label = ee.Image("projects/global-wetland-watch/assets/labels/COL/top10_label").unmask(-1).rename('wetland_label')
+    wetland_mask = wetland_label.gte(0).rename('wetland_mask')
+
+    fused_label_raw = wetland_label.where(wetland_label.eq(-1), world_cover).unmask().rename('fused_label_raw')
+    fused_label_raw = fused_label_raw.mask(fused_label_raw.gte(0)).int8()
 
     GWL_FCS30 = ee.ImageCollection("projects/global-wetland-watch/assets/training-data/global/GWL_FCS30_2020").mosaic().rename('GWL_FCS30')
 
@@ -409,10 +414,10 @@ def stack_features(check_date="2020-07-01"):
     cifor = ee.Image("projects/global-wetland-watch/assets/labels/global/CIFOR_2016_TROP_SUBTROP_Wetland_V3b").unmask().divide(10).int8().rename('cifor')
 
 
-    """ rescale bands """
-    synImg_s2_seasonal = synImg_s2_seasonal.multiply(1e4)
-    synImg_s1_seasonal = synImg_s1_seasonal.unitScale(-30, 5).multiply(1e4)
-    synImg_ss_seasonal = synImg_ss_seasonal.unitScale(-30, 5).multiply(1e4)
+    # """ rescale bands """
+    # synImg_s2_seasonal = synImg_s2_seasonal.multiply(1e4)
+    # synImg_s1_seasonal = synImg_s1_seasonal.unitScale(-30, 5).multiply(1e4)
+    # synImg_ss_seasonal = synImg_ss_seasonal.unitScale(-30, 5).multiply(1e4)
 
     """ stack all feature into a single image """
     # rename water and water_coefs band names for Sentinel-1
@@ -424,7 +429,7 @@ def stack_features(check_date="2020-07-01"):
                         rem, twi, terrain, hand30_1000, hand30_100, #// topography-based features
                         canopy_height, canopy_height_std,  #// canopy height features
                         ecoregion, biome, chirps_yearly_precip, era5_yearly_precip, soil_water, #// ecoregion, biome, chirps, era5
-                        world_cover, GWL_FCS30, wetland_label, wetland_mask, rfw, cifor #// labels
+                        fused_label_raw, world_cover, GWL_FCS30, wetland_label, wetland_mask, rfw, cifor #// labels
                     ]).set('system:time_start', ee.Date(check_date).millis())
     )
 

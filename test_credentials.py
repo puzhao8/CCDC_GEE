@@ -12,3 +12,13 @@ ee.Initialize(
 )
 
 
+#%%
+import pandas as pd
+cifor = pd.read_csv("outputs\sampled_training_points_wetland_mask_stratified_cifor.csv")
+
+df = pd.read_csv("outputs\sampled_training_points_wetland_mask_stratified.csv")
+
+#%%
+
+for col in ['canopy_height', 'cifor', 'rfw']:
+  df[col] = cifor[col]

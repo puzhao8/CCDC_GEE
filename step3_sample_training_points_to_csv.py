@@ -32,7 +32,7 @@ def sample_location(row):
     point = ee.Geometry.Point([row.longitude, row.latitude])
 
 
-    fc = stack.toInt16().reduceRegions(
+    fc = stack.reduceRegions(
             collection=ee.FeatureCollection([point]), 
             reducer=ee.Reducer.mean(), 
             scale=10).map(
@@ -52,24 +52,29 @@ if __name__ == "__main__":
     pntfc_wetMask = pd.read_csv("data/wetland_mask_Stratified_5k_per_cls.csv")
 
 
-    from ccdc import get_stacked_ccdc_features
-    stack = get_stacked_ccdc_features(check_date="2020-07-01")
+    from ccdc import stack_features
+    stack = stack_features(check_date="2020-07-01")\
+                .select(['canopy_height', 'rfw', 'cifor'])
+    
     # bandList = stack.bandNames().getInfo()
-    from band_names import bandList # includes .geo. lat, lon
 
 
-    csv_restart = True
-    save_url = Path("outputs/sampled_training_points_wetland_mask_stratified.csv")
-    if csv_restart or (not save_url.exists()):
-        # create an empty csv
-        df0 = pd.concat([pd.DataFrame([], columns=bandList)], axis=0)
-        df0.set_index('idx').to_csv(save_url)
+
+    save_url = Path("outputs/sampled_training_points_wetland_mask_stratified_cifor.csv")
+
+    # csv_restart = True
+    # if csv_restart or (not save_url.exists()):
+    #     # create an empty csv
+    #     from band_names import bandList # includes .geo. lat, lon
+    #     df0 = pd.concat([pd.DataFrame([], columns=bandList)], axis=0)
+    #     df0.set_index('idx').to_csv(save_url)
 
 
     pntfc = pntfc_wetMask
     for row in pntfc.itertuples():
         df = sample_location(row)
-        df.set_index('idx').to_csv(save_url, mode='a', header=False, index=True)
+        if 0 == row.Index:  df.set_index('idx').to_csv(save_url)
+        else: df.set_index('idx').to_csv(save_url, mode='a', header=False, index=True)
 
 
 

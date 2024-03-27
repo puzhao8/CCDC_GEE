@@ -4,39 +4,30 @@
 import pandas as pd
 from pathlib import Path
 import numpy as np
-from band_names import feature_dict
+from group_bands import feature_dict, label_bands, fused_class_dict
+
 np.random.seed(42)
 
 # configuration
 version = 'V1'
-y_col = 'wetland_mask'
+y_col = 'fused_label'
 band_select = True
 
-df = pd.read_csv(f"outputs/training/sampled_points_wetland_label_Stratified_1k_per_cls_mrg_{version}.csv")
+df = pd.read_csv(f"data/training/sampled_points_with_fused_label_stratified_1k_per_cls_V1.csv")
 
-seasonal_bands = feature_dict['Season']
-df[seasonal_bands] = df[seasonal_bands] / 1e4
 
 save_dir = Path(f"outputs/feature_importance_{version}/{y_col}")
 save_dir.mkdir(exist_ok=True, parents=True)
 
 #%%
 # for feature_key in feature_dict.keys():
-# for feature_key in [
-#     'S1_coefs',
-#     'SS_coefs',
-#     'S2_coefs',
-#     'S1_HM',
-#     'SS_HM',
-#     'S2_HM',
-#     'S2_HM_V2']:
-for feature_key in ['TOPO_V2']:
+for feature_key in ['TOPO', 'S1', 'S2', 'SS', 'ALL', 'S1_coefs', 'S2_coefs', 'SS_coefs', 'S1_HM', 'S2_HM', 'SS_HM']:
+    print(f"------------------- {feature_key} -------------------------")
 
     # remove some label bands 
     rmse_bands = list(df.filter(regex='.*rmse.*').columns)
-    drop_bands = ['world_cover', 'GWL_FCS30', 'wetland_label', 'wetland_mask', 'cifor', 'rfw', 'idx', 'geometry', 'lat', 'lon']
+    drop_bands = label_bands + ['idx', 'geometry', 'lat', 'lon']
     drop_bands += rmse_bands
-
 
     if band_select: # select a few bands
         selected_bands = feature_dict[feature_key]
@@ -49,7 +40,15 @@ for feature_key in ['TOPO_V2']:
         X = df.drop(drop_bands, axis=1)
 
     X = X.dropna()
+    X.replace([np.inf, -np.inf], 0, inplace=True)
+
     y = X[y_col].astype(int)
+
+    # class names 
+    unique_label_idx = sorted(y.unique())
+    cls_name_bank = list(fused_class_dict.values())
+    cls_names = [cls_name_bank[cls] for cls in unique_label_idx]
+    print(f"unique_label_idx: {unique_label_idx}")
 
     # remove labels from X
     X = X.drop([y_col], axis=1) 
@@ -97,12 +96,25 @@ for feature_key in ['TOPO_V2']:
     import matplotlib.pyplot as plt
 
     cm = confusion_matrix(y_test, y_pred, labels=clf.classes_.astype(int))
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm,
-                            display_labels=clf.classes_.astype(int))
-    disp.plot()
-    plt.title(f"{feature_key}_{y_col}_{num_bands}_bands")
+    df_cm = pd.DataFrame(data=cm, index=cls_names, columns=cls_names).astype(np.int16)
+
+    # disp = ConfusionMatrixDisplay(confusion_matrix=cm,
+    #                         display_labels=clf.classes_.astype(int))
+    # disp.plot()
+    # plt.title(f"{feature_key}_{y_col}_{num_bands}_bands")
+    # plt.tight_layout()
+    # plt.savefig(save_dir / f"{feature_key}_{y_col}_{num_bands}_bands_Confusion_Matrix")
+    # plt.close()
+
+
+    import seaborn as sns
+    plt.figure(figsize=(20, 15))
+    sns.heatmap(data=df_cm, annot=True, annot_kws={"size": 16}, fmt='g', vmin=0, vmax=50, cmap=sns.color_palette("rocket", as_cmap=True))
+    plt.xticks(fontsize=20, rotation=40, ha='right')
+    plt.yticks(fontsize=22)
+    plt.title(f"Confusion Matrix: [{feature_key} -> {y_col}]\n (Acc: {df_report.loc['accuracy', 'f1-score']:.2f}, wAvgF1: {df_report.loc['weighted avg', 'f1-score']:.2f})", fontsize=25)
     plt.tight_layout()
-    plt.savefig(save_dir / f"{feature_key}_{y_col}_{num_bands}_bands_Confusion_Matrix")
+    plt.savefig(save_dir / f"{feature_key}_{y_col}_{num_bands}_bands_Confusion_Matrix.png")
     plt.close()
 
     #%%
@@ -169,36 +181,53 @@ for feature_key in ['TOPO_V2']:
 
     #%% multicolliner_features
 
-    try:
-        from scipy.cluster import hierarchy
-        from scipy.spatial.distance import squareform
-        from scipy.stats import spearmanr
+    # try:
+    from scipy.cluster import hierarchy
+    from scipy.spatial.distance import squareform
+    from scipy.stats import spearmanr
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(48, 16))
-        corr = spearmanr(X).correlation
+    fig, ax = plt.subplots(1, 1)
+    corr = spearmanr(X).correlation
 
-        # Ensure the correlation matrix is symmetric
-        corr = (corr + corr.T) / 2
-        np.fill_diagonal(corr, 1)
+    # Ensure the correlation matrix is symmetric
+    corr = (corr + corr.T) / 2
+    np.fill_diagonal(corr, 1)
 
-        # We convert the correlation matrix to a distance matrix before performing
-        # hierarchical clustering using Ward's linkage.
-        distance_matrix = 1 - np.abs(corr)
-        dist_linkage = hierarchy.ward(squareform(distance_matrix))
-        dendro = hierarchy.dendrogram(
-            dist_linkage, labels=X.columns.to_list(), ax=ax1, leaf_rotation=90
-        )
-        dendro_idx = np.arange(0, len(dendro["ivl"]))
+    # We convert the correlation matrix to a distance matrix before performing
+    # hierarchical clustering using Ward's linkage.
+    distance_matrix = 1 - np.abs(corr)
+    dist_linkage = hierarchy.ward(squareform(distance_matrix))
+    dendro = hierarchy.dendrogram(
+        dist_linkage, labels=X.columns.to_list(), ax=ax, leaf_rotation=90
+    )
+    dendro_idx = np.arange(0, len(dendro["ivl"]))
 
-        ax2.imshow(corr[dendro["leaves"], :][:, dendro["leaves"]])
-        ax2.set_xticks(dendro_idx)
-        ax2.set_yticks(dendro_idx)
-        ax2.set_xticklabels(dendro["ivl"], rotation="vertical")
-        ax2.set_yticklabels(dendro["ivl"])
-        _ = fig.tight_layout()
+    # ax2.imshow(corr[dendro["leaves"], :][:, dendro["leaves"]])
+    # ax2.set_xticks(dendro_idx)
+    # ax2.set_yticks(dendro_idx)
+    # ax2.set_xticklabels(dendro["ivl"], rotation="vertical")
+    # ax2.set_yticklabels(dendro["ivl"])
+    _ = fig.tight_layout()
 
-        fig.savefig(save_dir / f"{feature_key}_{y_col}_{num_bands}_bands_handle_multicolliner_features.png", dpi=300)
+    fig.savefig(save_dir / f"{feature_key}_{y_col}_{num_bands}_bands_multicolliner.png", dpi=300)
 
-    except:
-        print(f"{feature_key} multicolliner plot failed !")
+    " plot correlation matrix only "
+    from matplotlib.colors import LinearSegmentedColormap as lsc
+    cmap = lsc.from_list("custom_cmap", ["white", "darkred"])
+
+    fig, ax = plt.subplots(1, 1)
+    # , cmap=lsc.from_list("custom_cmap", ["white", "darkred"])
+    cmap = sns.color_palette("rocket", as_cmap=True)
+    im = ax.imshow(corr[dendro["leaves"], :][:, dendro["leaves"]], cmap=cmap, vmin=0, vmax=1)
+    ax.set_xticks(dendro_idx)
+    ax.set_yticks(dendro_idx)
+    ax.set_xticklabels(dendro["ivl"], rotation="vertical")
+    ax.set_yticklabels(dendro["ivl"])
+    ax.set_title(f"{feature_key}_{y_col}_{num_bands}_bands")
+    fig.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    fig.savefig(save_dir / f"{feature_key}_{y_col}_{num_bands}_bands_correlation.png", dpi=300)
+
+    # except:
+    #     print(f"{feature_key} multicolliner plot failed !")
 

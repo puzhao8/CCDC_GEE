@@ -21,13 +21,16 @@ def sample_location(row):
     point = ee.Geometry.Point([row.longitude, row.latitude])
 
     def sample_time_series(image):
-        return image.reduceRegions(collection=ee.FeatureCollection([point]), reducer=ee.Reducer.mean(), scale=10)\
-                    .map(lambda x: x.set({
-                                            'FoY': image.get('FoY'),
-                                            'lon': row.longitude,
-                                            'lat': row.latitude
-                                        })
-                        )
+        return image.reduceRegions(
+                            collection=ee.FeatureCollection([point]), 
+                            reducer=ee.Reducer.mean(), 
+                            scale=10
+                        ).map(lambda x: x.set({
+                                                'FoY': image.get('FoY'),
+                                                'lon': row.longitude,
+                                                'lat': row.latitude
+                                            })
+                                    )
     
     s2ImgCol = get_preprocessed_Sentinel2({
         'region': point,
@@ -103,4 +106,16 @@ if __name__ == "__main__":
 
     # 2626 -> 2726
     # 2677, Exception: User memory limit exceeded.
+
+
+
+    
+    #%%
+
+    import dask.dataframe as dd
+
+    ddf = dd.read_csv(f"outputs/dask_outputs/partition_*.csv", on_bad_lines='skip', assume_missing=True) 
+    df = ddf.compute()
+    df = df[(df.wetland_label >= 0) & (df.wetland_label <= 10)]
+    df.set_index('idx').to_csv("data/training\sampled_points_wetland_label_Stratified_1k_per_cls_mrg_V2.csv")
 
